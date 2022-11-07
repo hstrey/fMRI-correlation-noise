@@ -68,6 +68,52 @@ end
     end
 end
 
+# Ornstein-Uhlenbeck process of two coupled oscillators with thermal noise
+@model ou_corrn(rn1,rn2,T,delta_t,::Type{R}=Vector{Float64}) where {R} = begin
+    ampl1 ~ Uniform(0.0,5.0)
+    ampl2 ~ Uniform(0.0,5.0)
+    d ~ Uniform(0.0,5.0)
+    b1 = exp(-delta_t*d/ampl1)
+    b2 = exp(-delta_t*d/ampl2)
+    noise_ampl ~ Uniform(0.0,1)
+
+    r1 = R(undef, T)
+    r2 = R(undef, T)
+
+    r1[1] ~ Normal(0,sqrt(ampl1))
+    r2[1] ~ Normal(0,sqrt(ampl2))   
+
+    for i=2:T
+        r1[i] ~ Normal(r1[i-1]*b1,sqrt(ampl1*(1-b1^2)))
+        r2[i] ~ Normal(r2[i-1]*b2,sqrt(ampl2*(1-b2^2)))
+    end
+    rn1 ~ MvNormal(r1,sqrt(noise_ampl))
+    rn2 ~ MvNormal(r2,sqrt(noise_ampl))
+end
+
+# Ornstein-Uhlenbeck process of two coupled oscillators with thermal noise
+@model ou_corrmn(rn1,rn2,T,delta_t,::Type{R}=Vector{Float64}) where {R} = begin
+    ampl1 ~ Uniform(0.0,5.0)
+    ampl2 ~ Uniform(0.0,5.0)
+    d ~ Uniform(0.0,5.0)
+    b1 = exp(-delta_t*d/ampl1)
+    b2 = exp(-delta_t*d/ampl2)
+    noise_ampl_t ~ Uniform(0.0,1)
+
+    r1 = R(undef, T)
+    r2 = R(undef, T)
+
+    r1[1] ~ Normal(0,sqrt(ampl1))
+    r2[1] ~ Normal(0,sqrt(ampl2))   
+
+    for i=2:T
+        r1[i] ~ Normal(r1[i-1]*b1,sqrt(ampl1*(1-b1^2)))
+        r2[i] ~ Normal(r2[i-1]*b2,sqrt(ampl2*(1-b2^2)))
+    end
+    rn1 ~ MvNormal(r1,sqrt.(noise_ampl_t .+ noise_ampl_t*abs.(r1)))
+    rn2 ~ MvNormal(r2,sqrt.(noise_ampl_t .+ noise_ampl_t*abs.(r2)))
+end
+
 # Ornstein-Uhlenbeck process with added Gaussian noise
 @model oupn(rn,T,delta_t,::Type{R}=Vector{Float64}) where {R} = begin
     ampl ~ Uniform(0.0,5.0)
@@ -85,7 +131,7 @@ end
     rn ~ MvNormal(r,sqrt(noise_ampl))
 end
 
-x1, x2 = corr_osc(-0.8)
+x1, x2 = corr_osc(5)
 
 p1 = Plots.plot(x1)
 p1 = Plots.plot!(x2)
@@ -96,7 +142,7 @@ println(pearson)
 # lets see whether we can estimate c from the data
 y1 = x1 .+ x2
 y2 = x1 .- x2
-chn = sample(ou_corr(y1,y2,length(y1),0.1), NUTS(0.65), 10000)
+chn = sample(ou_corr(y1,y2,length(y1),0.1), NUTS(0.65), 2000)
 
 print(describe(chn))
 p2 = plot(chn)
@@ -104,7 +150,7 @@ p2 = plot(chn)
 ampl1 = Array(chn[:ampl1])
 ampl2 = Array(chn[:ampl2])
 
-if ampl1>ampl2
+if mean(ampl1)>mean(ampl2)
     c = (ampl1 .- ampl2)./ampl2
 else
     c = (ampl1 .- ampl2)./ampl1
@@ -112,3 +158,53 @@ end
 
 println("A1,A2: ",mean(ampl1),",",mean(ampl2))
 println("c estimate: ",mean(c),"std: ",std(c))
+
+# add some thermal noise
+norm_dist = Normal(0,sqrt(0.2)) # 20% thermal noise
+x1n = x1 .+ rand(norm_dist,length(x1))
+x2n = x2 .+ rand(norm_dist,length(x2))
+
+pearsonn = Statistics.cor(x1n,x2n)
+
+y1n = x1n .+ x2n
+y2n = x1n .- x2n
+chnn = sample(ou_corrn(y1n,y2n,length(y1n),0.1), NUTS(0.65), 2000)
+
+ampl1n = Array(chnn[:ampl1])
+ampl2n = Array(chnn[:ampl2])
+
+if mean(ampl1n)>mean(ampl2n)
+    cn = (ampl1n .- ampl2n)./ampl2n
+else
+    cn = (ampl1n .- ampl2n)./ampl1n
+end
+
+println("A1,A2: ",mean(ampl1n),",",mean(ampl2n))
+println("c estimate: ",mean(cn),"std: ",std(cn))
+
+# add some thermal and multiplicative noise
+ratio = 1
+Tnoise = 0.2
+norm_dist = Normal(0,sqrt(Tnoise))
+x1mn = x1 .+ [rand(Normal(0,ratio*Tnoise*sqrt(abs(x)))) for x in x1] .+ rand(norm_dist,length(x1))
+x2mn = x2 .+ [rand(Normal(0,ratio*Tnoise*sqrt(abs(x)))) for x in x2] .+ rand(norm_dist,length(x2))
+
+pearsonn = Statistics.cor(x1mn,x2mn)
+
+y1mn = x1mn .+ x2mn
+y2mn = x1mn .- x2mn
+chnmn = sample(ou_corrmn(y1mn,y2mn,length(y1mn),0.1), NUTS(0.65), 2000)
+
+ampl1mn = Array(chnmn[:ampl1])
+ampl2mn = Array(chnmn[:ampl2])
+
+if mean(ampl1mn)>mean(ampl2mn)
+    cmn = (ampl1mn .- ampl2mn)./ampl2mn
+else
+    cmn = (ampl1mn .- ampl2mn)./ampl1mn
+end
+
+println("A1,A2: ",mean(ampl1mn),",",mean(ampl2mn))
+println("c estimate: ",mean(cmn),"std: ",std(cmn))
+
+p2 = plot(chnmn[[:ampl1,:ampl2,:noise_ampl_t]])
