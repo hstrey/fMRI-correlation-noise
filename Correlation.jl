@@ -7,6 +7,7 @@ Turing.setadbackend(:reversediff)
 Turing.setrdcache(true)
 using Distributions
 using LinearAlgebra
+using Turing: Variational
 
 # here we are simulating the signal of two coupled oscillators
 # with amplitudes A1 and A2 of kBT/k and kBT/(k+c) where c is the coupling constant
@@ -184,16 +185,16 @@ println("c estimate: ",mean(cn),"std: ",std(cn))
 
 # add some thermal and multiplicative noise
 ratio = 1
-Tnoise = 0.2
-norm_dist = Normal(0,sqrt(Tnoise))
-x1mn = x1 .+ [rand(Normal(0,ratio*Tnoise*sqrt(abs(x)))) for x in x1] .+ rand(norm_dist,length(x1))
-x2mn = x2 .+ [rand(Normal(0,ratio*Tnoise*sqrt(abs(x)))) for x in x2] .+ rand(norm_dist,length(x2))
+Tnoise = 0.4
+x1mn = x1 .+ [rand(Normal(0,sqrt(Tnoise*(1+ratio*abs(x))))) for x in x1]
+x2mn = x2 .+ [rand(Normal(0,sqrt(Tnoise*(1+ratio*abs(x))))) for x in x2]
 
 pearsonn = Statistics.cor(x1mn,x2mn)
 
 y1mn = x1mn .+ x2mn
 y2mn = x1mn .- x2mn
-chnmn = sample(ou_corrmn(y1mn,y2mn,length(y1mn),0.1), NUTS(0.65), 2000)
+modelmn = ou_corrmn(y1mn[1:400],y2mn[1:400],length(y1mn[1:400]),0.1)
+chnmn = sample(modelmn, NUTS(0.65), 2000)
 
 ampl1mn = Array(chnmn[:ampl1])
 ampl2mn = Array(chnmn[:ampl2])
@@ -204,7 +205,51 @@ else
     cmn = (ampl1mn .- ampl2mn)./ampl1mn
 end
 
+r1avg = mean(Array(group(chnmn, :r1));dims=1)[1,:]
+plot(r1avg)
+plot!(y1[1:400],alpha=0.5)
+
 println("A1,A2: ",mean(ampl1mn),",",mean(ampl2mn))
 println("c estimate: ",mean(cmn),"std: ",std(cmn))
 
 p2 = plot(chnmn[[:ampl1,:ampl2,:noise_ampl_t]])
+
+plot(x1, label="x1")
+plot!(x1mn, label="x1 + noise")
+
+plot(x2, label="x2")
+plot!(x2mn, label="x2 + noise")
+
+# lets try ADVI
+advi = ADVI(10, 1000)
+setchunksize(8)
+q = vi(modelmn, advi)
+
+# sampling
+z = rand(q, 1000)
+avg = vec(mean(z; dims = 2))
+zstd = vec(std(z; dims = 2))
+y1avg = avg[5:404]
+y2avg = avg[405:end]
+
+ampl1amn = z[1,:]
+ampl2amn = z[2,:]
+
+if mean(ampl1amn)>mean(ampl2amn)
+    camn = (ampl1amn .- ampl2amn)./ampl2amn
+else
+    camn = (ampl1amn .- ampl2amn)./ampl1amn
+end
+
+println("A1,A2: ",mean(ampl1amn),",",mean(ampl2amn))
+println("c estimate: ",mean(camn),"std: ",std(camn))
+
+# compare advi to ground truth
+plot(y1avg, label="estimate")
+plot!(y1[1:400],label="ground truth")
+plot!(y1mn[1:400],alpha=0.5,label="data")
+
+# compare advi and MCMC in predicting original time-series
+plot(r1avg, label="MCMC")
+plot!(y1avg, label="ADVI")
+plot!(y1[1:400],label="ground truth",alpha=0.5)
