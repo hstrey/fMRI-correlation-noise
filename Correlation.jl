@@ -185,7 +185,7 @@ println("c estimate: ",mean(cn),"std: ",std(cn))
 
 # add some thermal and multiplicative noise
 ratio = 1
-Tnoise = 0.4
+Tnoise = 0.2
 x1mn = x1 .+ [rand(Normal(0,sqrt(Tnoise*(1+ratio*abs(x))))) for x in x1]
 x2mn = x2 .+ [rand(Normal(0,sqrt(Tnoise*(1+ratio*abs(x))))) for x in x2]
 
@@ -193,7 +193,7 @@ pearsonn = Statistics.cor(x1mn,x2mn)
 
 y1mn = x1mn .+ x2mn
 y2mn = x1mn .- x2mn
-modelmn = ou_corrmn(y1mn[1:400],y2mn[1:400],length(y1mn[1:400]),0.1)
+modelmn = ou_corrmn(y1mn,y2mn,length(y1mn),0.1)
 chnmn = sample(modelmn, NUTS(0.65), 2000)
 
 ampl1mn = Array(chnmn[:ampl1])
